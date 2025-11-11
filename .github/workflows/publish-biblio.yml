@@ -17,6 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Clean up git locks
+        run: |
+          if [ -f .git/index.lock ]; then
+            rm .git/index.lock
+          fi
+
       - name: Setup node
         uses: actions/setup-node@v4
         with:
