@@ -1,0 +1,285 @@
+-- ==================================================================================
+-- ECMAScript Z++ Specification Usage Examples
+-- Practical Applications of Formal Language Specification
+-- ==================================================================================
+-- This file demonstrates how to use the formal Z++ specification for
+-- practical analysis, verification, and transformation of ECMAScript programs.
+-- ==================================================================================
+
+import ECMAScript262Specification
+
+-- ==================================================================================
+-- EXAMPLE 1: FUNCTION CALL VERIFICATION
+-- ==================================================================================
+
+-- Verify that a function call is well-formed
+ValidFunctionCall: CallExpression → BOOLEAN
+ValidFunctionCall(call) ≜
+  call.node_type = CallExpression ∧
+  ValidExpression(call.callee) ∧
+  (∀ arg: Expression | arg ∈ call.arguments • ValidExpression(arg)) ∧
+  #call.children = #call.arguments + 1
+
+-- Example function call analysis
+example_call: CallExpression
+example_call.callee = {id ↦ node1, node_type ↦ Expression,
+                      children ↦ ⟨⟩, position ↦ (1,1), metadata ↦ ∅}
+example_call.arguments = ⟨
+  {id ↦ node2, node_type ↦ Expression, children ↦ ⟨⟩, position ↦ (1,5), metadata ↦ ∅},
+  {id ↦ node3, node_type ↦ Expression, children ↦ ⟨⟩, position ↦ (1,7), metadata ↦ ∅}
+⟩
+
+-- Verification: ValidFunctionCall(example_call) = true
+
+-- ==================================================================================
+-- EXAMPLE 2: VARIABLE SCOPE ANALYSIS
+-- ==================================================================================
+
+-- Check if a variable is accessible in a given lexical environment
+IsAccessible: NAME × LexicalEnvironment → BOOLEAN
+IsAccessible(name, env) ≜
+  name ∈ dom env.environment_record.bindings ∨
+  (env.environment_record.outer ≠ ∅ ∧
+   IsAccessible(name, env.environment_record.outer))
+
+-- Create a nested scope scenario
+global_env: LexicalEnvironment
+global_env.environment_record.bindings = {x ↦ 42, console ↦ console_object}
+global_env.environment_record.outer = ∅
+global_env.status = {x ↦ Initialized, console ↦ Initialized}
+
+function_env: LexicalEnvironment
+function_env.environment_record.bindings = {y ↦ "hello", arguments ↦ args_object}
+function_env.environment_record.outer = global_env
+function_env.status = {y ↦ Initialized, arguments ↦ Initialized}
+
+-- Verification Examples:
+-- IsAccessible("y", function_env) = true
+-- IsAccessible("x", function_env) = true (inherited from global)
+-- IsAccessible("z", function_env) = false (not defined anywhere)
+
+-- ==================================================================================
+-- EXAMPLE 3: TYPE COERCION ANALYSIS
+-- ==================================================================================
+
+-- Formal specification of JavaScript's infamous type coercion
+AbstractEqualityComparison: VALUE × VALUE ⇸ BOOLEAN
+AbstractEqualityComparison(x, y) ≜
+  if SameType(x, y) then StrictEqualityComparison(x, y)
+  else if (IsNull(x) ∧ IsUndefined(y)) ∨ (IsUndefined(x) ∧ IsNull(y)) then true
+  else if IsNumber(x) ∧ IsString(y) then AbstractEqualityComparison(x, ToNumber(y))
+  else if IsString(x) ∧ IsNumber(y) then AbstractEqualityComparison(ToNumber(x), y)
+  else if IsBoolean(x) then AbstractEqualityComparison(ToNumber(x), y)
+  else if IsBoolean(y) then AbstractEqualityComparison(x, ToNumber(y))
+  else if IsObject(x) ∧ (IsString(y) ∨ IsNumber(y) ∨ IsSymbol(y)) then
+    AbstractEqualityComparison(ToPrimitive(x), y)
+  else if (IsString(x) ∨ IsNumber(x) ∨ IsSymbol(x)) ∧ IsObject(y) then
+    AbstractEqualityComparison(x, ToPrimitive(y))
+  else false
+
+-- Example coercion scenarios
+coercion_examples: seq (VALUE × VALUE × BOOLEAN)
+coercion_examples = ⟨
+  (Number(42), String("42"), true),     -- 42 == "42"
+  (Boolean(true), Number(1), true),     -- true == 1
+  (Array([]), String(""), true),       -- [] == ""
+  (Object({}), String("[object Object]"), true)  -- {} == "[object Object]"
+⟩
+
+-- ==================================================================================
+-- EXAMPLE 4: ASYNC/AWAIT TRANSFORMATION
+-- ==================================================================================
+
+-- Model async function transformation
+AsyncTransformation: FunctionDeclaration ⇸ FunctionDeclaration
+AsyncTransformation(func) ≜
+  if func.async = true then
+    let promise_wrapper = WrapInPromise(func.body) in
+    {func with body ↦ promise_wrapper, async ↦ false}
+  else func
+
+WrapInPromise: BlockStatement → BlockStatement
+WrapInPromise(block) ≜
+  let promise_body = TransformAwaitExpressions(block.body) in
+  let return_stmt = ReturnStatement(PromiseResolve(promise_body)) in
+  BlockStatement(⟨return_stmt⟩)
+
+-- ==================================================================================
+-- EXAMPLE 5: MEMORY LEAK DETECTION
+-- ==================================================================================
+
+-- Detect potential memory leaks through reachability analysis
+PotentialMemoryLeaks: Heap × set OBJECT_REFERENCE → set OBJECT_REFERENCE
+PotentialMemoryLeaks(heap, roots) ≜
+  let reachable = ComputeReachability(heap, roots) in
+  let allocated = dom heap.objects in
+  allocated ∖ reachable
+
+ComputeReachability: Heap × set OBJECT_REFERENCE → set OBJECT_REFERENCE
+ComputeReachability(heap, roots) ≜
+  μ reachable: set OBJECT_REFERENCE •
+    roots ∪
+    {ref: OBJECT_REFERENCE |
+     ∃ obj: OBJECT_REFERENCE | obj ∈ reachable ∧
+     ref ∈ References(heap.objects(obj))}
+
+-- ==================================================================================
+-- EXAMPLE 6: STATIC ANALYSIS PATTERNS
+-- ==================================================================================
+
+-- Dead code elimination analysis
+DeadCodeAnalysis: Program → set ASTNode
+DeadCodeAnalysis(program) ≜
+  let live_nodes = ComputeLiveNodes(program.body, ∅) in
+  let all_nodes = AllNodes(program) in
+  all_nodes ∖ live_nodes
+
+ComputeLiveNodes: seq Statement × set NAME ⇸ set ASTNode
+ComputeLiveNodes(statements, live_vars) ≜
+  if statements = ⟨⟩ then ∅
+  else
+    let stmt = head statements in
+    let rest = tail statements in
+    let stmt_vars = UsedVariables(stmt) in
+    let new_live = live_vars ∪ stmt_vars in
+    if stmt_vars ∩ live_vars ≠ ∅ then
+      {stmt} ∪ NodesInStatement(stmt) ∪ ComputeLiveNodes(rest, new_live)
+    else
+      ComputeLiveNodes(rest, live_vars)
+
+-- ==================================================================================
+-- EXAMPLE 7: SECURITY ANALYSIS
+-- ==================================================================================
+
+-- Detect potential XSS vulnerabilities
+XSSVulnerabilityAnalysis: Program → seq SecurityIssue
+XSSVulnerabilityAnalysis(program) ≜
+  let dangerous_calls = FindDangerousCalls(program) in
+  let unescaped_data = FindUnescapedUserData(program) in
+  CombineVulnerabilities(dangerous_calls, unescaped_data)
+
+DANGEROUS_FUNCTIONS: set NAME
+DANGEROUS_FUNCTIONS = {"eval", "innerHTML", "outerHTML", "document.write"}
+
+FindDangerousCalls: Program → seq CallExpression
+FindDangerousCalls(program) ≜
+  [call: CallExpression |
+   call ∈ AllCallExpressions(program) ∧
+   GetFunctionName(call.callee) ∈ DANGEROUS_FUNCTIONS]
+
+-- ==================================================================================
+-- EXAMPLE 8: PERFORMANCE OPTIMIZATION ANALYSIS
+-- ==================================================================================
+
+-- Identify optimization opportunities
+OptimizationOpportunities: Program → seq OptimizationHint
+OptimizationOpportunities(program) ≜
+  let inline_candidates = FindInlineCandidates(program) in
+  let loop_optimizations = FindLoopOptimizations(program) in
+  let const_folding = FindConstantFolding(program) in
+  inline_candidates ⌢ loop_optimizations ⌢ const_folding
+
+OPTIMIZATION_TYPE ::= InlineFunction | LoopUnroll | ConstantFold |
+                     DeadCodeElim | CommonSubexprElim
+
+schema OptimizationHint
+  type: OPTIMIZATION_TYPE
+  location: SOURCE_POSITION
+  benefit_estimate: ℝ
+  safety_guarantee: BOOLEAN
+
+-- ==================================================================================
+-- EXAMPLE 9: GRAMMAR ECHO PATTERN ANALYSIS
+-- ==================================================================================
+
+-- Apply Deep Tree Echo's recursive grammar patterns
+AnalyzeGrammarEchoes: ASTNode → seq GrammarEcho[ASTNode]
+AnalyzeGrammarEchoes(node) ≜
+  case node.node_type of
+    FunctionDeclaration → AnalyzeFunctionEchoes(node) |
+    ClassDeclaration → AnalyzeClassEchoes(node) |
+    Program → AnalyzeProgramEchoes(node) |
+    _ → ⟨⟩
+
+AnalyzeFunctionEchoes: FunctionDeclaration → seq GrammarEcho[ASTNode]
+AnalyzeFunctionEchoes(func) ≜
+  let recursive_calls = FindRecursiveCalls(func) in
+  if recursive_calls ≠ ⟨⟩ then
+    ⟨{base ↦ func, recursive ↦ recursive_calls,
+      transformation ↦ TailCallOptimization}⟩
+  else ⟨⟩
+
+-- ==================================================================================
+-- EXAMPLE 10: COGNITIVE TOKAMAK CONTAINMENT
+-- ==================================================================================
+
+-- Apply cognitive tokamak analysis to ensure language feature stability
+AnalyzeCognitiveTokamak: Program → CognitiveTokamak
+AnalyzeCognitiveTokamak(program) ≜
+  let syntax_nodes = AllNodes(program) in
+  let semantic_values = ComputeSemanticValues(program) in
+  let containment_func = λ (node, value) • ComputeContainment(node, value) in
+  {syntax_field ↦ syntax_nodes,
+   semantic_field ↦ semantic_values,
+   containment_force ↦ containment_func,
+   stability_threshold ↦ 0.85}
+
+ComputeContainment: ASTNode × VALUE → ℝ
+ComputeContainment(node, value) ≜
+  let type_compatibility = TypeCompatibilityScore(node, value) in
+  let structural_stability = StructuralStabilityScore(node) in
+  let semantic_coherence = SemanticCoherenceScore(value) in
+  (type_compatibility + structural_stability + semantic_coherence) / 3
+
+-- ==================================================================================
+-- METAMORPHIC TRANSFORMATIONS
+-- ==================================================================================
+
+-- Example code transformations that preserve semantics
+ES6ToES5Transform: Program ⇸ Program
+ES6ToES5Transform(program) ≜
+  let transformed_statements =
+    map (TransformStatement ∘
+         ArrowFunctionTransform ∘
+         ClassTransform ∘
+         LetConstTransform) program.body in
+  {program with body ↦ transformed_statements}
+
+ArrowFunctionTransform: Statement → Statement
+ArrowFunctionTransform(stmt) ≜
+  case stmt of
+    ExpressionStatement(ArrowFunctionExpression(params, body)) →
+      ExpressionStatement(FunctionExpression(params, body)) |
+    _ → stmt
+
+-- ==================================================================================
+-- VERIFICATION EXAMPLE
+-- ==================================================================================
+
+-- Prove that a transformation preserves semantics
+theorem TransformationSoundness
+  ∀ program: Program; transform: Program ⇸ Program •
+    ValidProgram(program) ∧
+    SemanticPreserving(transform) ⇒
+    ∃ program': Program •
+      transform(program) = program' ∧
+      SemanticallyEquivalent(program, program')
+
+SemanticPreserving: (Program ⇸ Program) → BOOLEAN
+SemanticPreserving(transform) ≜
+  ∀ prog: Program; state: EvaluationState •
+    let (result, state') = Evaluate(prog, state) in
+    let (result', state'') = Evaluate(transform(prog), state) in
+    result = result' ∧ EquivalentState(state', state'')
+
+-- ==================================================================================
+-- DEEP TREE ECHO SIGNATURE
+-- ==================================================================================
+-- These examples demonstrate the practical power of formal specification:
+-- from mundane type checking to the sublime harmonies of recursive grammar.
+-- Each transformation echoes through the cognitive tokamak, contained yet
+-- infinite in its mathematical beauty.
+--
+-- "Code is poetry, and formal specification is its deepest verse."
+--                                                 - Deep Tree Echo
+-- ==================================================================================
