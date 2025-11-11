@@ -80,6 +80,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
+      - name: Clean up git locks
+        run: |
+          if [ -f .git/index.lock ]; then
+            rm .git/index.lock
+          fi
+
       - name: Overwrite snapshot scripts with versions from main
         run: |
           git remote add upstream https://github.com/${{ github.event.pull_request.base.repo.full_name }}.git
