@@ -2,6 +2,10 @@
 
 set -euxo pipefail
 
+# Clean up any git locks before starting
+if [ -f .git/index.lock ]; then
+  rm .git/index.lock
+fi
 
 npx ecmarkup --verbose spec.html --write-biblio biblio/biblio.json /dev/null
 

@@ -13,6 +13,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Clean up git locks
+        run: |
+          if [ -f .git/index.lock ]; then
+            rm .git/index.lock
+          fi
+
       - uses: ljharb/actions/node/install@7f214d8efdbdcefc96ad9689663ef387a195deec
         name: 'nvm install lts/* && npm ci --no-audit'
         env:

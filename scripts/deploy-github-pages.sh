@@ -2,6 +2,11 @@
 
 set -euxo pipefail
 
+# Clean up any git locks before starting
+if [ -f .git/index.lock ]; then
+  rm .git/index.lock
+fi
+
 DEST_DIR="gh-pages"
 COMMIT_MESSAGE="Update gh-pages"
 if [[ "${1:-}" == "--pr" && -n "${2:-}" ]]; then
@@ -16,6 +21,12 @@ declare -r COMMIT_MESSAGE
 
 cd "$(dirname "$BASH_SOURCE")"/..
 git clone --depth 1 --branch gh-pages "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+
+# Clean up any git locks in the cloned repository
+if [ -f gh-pages/.git/index.lock ]; then
+  rm gh-pages/.git/index.lock
+fi
+
 if [[ "${1:-}" == "--pr" ]]; then
   rm -rf "$DEST_DIR"
 else

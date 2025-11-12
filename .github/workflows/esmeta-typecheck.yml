@@ -25,6 +25,10 @@ jobs:
           mkdir -p "${ESMETA_HOME}"
           cd "${ESMETA_HOME}"
           git init
+          # Clean up any potential git locks
+          if [ -f .git/index.lock ]; then
+            rm .git/index.lock
+          fi
           git remote add origin https://github.com/es-meta/esmeta.git
           git fetch --depth 1 origin 154cd346cfad4bfb485de1c34fc9715748e2d517 ;# v0.6.4
           git checkout FETCH_HEAD
