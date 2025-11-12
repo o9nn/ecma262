@@ -1,0 +1,484 @@
+-- ==================================================================================
+-- ECMA-262 Build System Formal Specification in Z++
+-- Formal Model of the Specification Build Pipeline and Toolchain
+-- ==================================================================================
+-- This specification captures the build system state, operations, and invariants
+-- for transforming the ECMAScript specification source into publishable formats.
+-- ==================================================================================
+
+schema BuildSystemSpecification
+
+-- ==================================================================================
+-- FOUNDATIONAL TYPES FOR BUILD SYSTEM
+-- ==================================================================================
+
+-- File System Abstractions
+given [FILE_PATH]
+given [FILE_CONTENT]
+given [DIRECTORY_PATH]
+
+FILE_NAME == seq CHARACTER
+FILE_EXTENSION ::= html | js | mjs | json | svg | css | md | zpp | yml | sh
+
+schema File
+  path: FILE_PATH
+  name: FILE_NAME
+  extension: FILE_EXTENSION
+  content: FILE_CONTENT
+  size: ℕ
+  timestamp: ℕ
+⊣
+  size = #content
+
+-- Build Artifact Types
+ARTIFACT_TYPE ::= SinglePageHTML | MultiPageHTML | PDF | Snapshot
+
+-- ==================================================================================
+-- SOURCE FILE MODELS
+-- ==================================================================================
+
+schema SpecificationSource
+  File
+  ecmarkup_elements: ℙ ECMARKUP_TAG
+  grammar_productions: ℙ GRAMMAR_RULE
+  algorithm_steps: ℙ ALGORITHM
+  cross_references: ℙ XREF
+⊣
+  extension = html ∧
+  name = "spec.html" ∧
+  size > 50000  -- Specification is large (53,434 lines)
+
+ECMARKUP_TAG ::= emu_intro | emu_clause | emu_grammar | emu_alg | 
+                 emu_xref | emu_note | emu_example | emu_table |
+                 emu_figure | emu_annexe | emu_import
+
+given [GRAMMAR_RULE]
+given [ALGORITHM]
+given [XREF]
+
+schema AssetFile
+  File
+⊣
+  extension = svg ∨ extension = css
+
+schema SupportingTable
+  File
+⊣
+  name ∈ {"table-binary-unicode-properties.html",
+           "table-binary-unicode-properties-of-strings.html",
+           "table-nonbinary-unicode-properties.html"}
+
+-- ==================================================================================
+-- BUILD ENVIRONMENT STATE
+-- ==================================================================================
+
+schema BuildEnvironment
+  node_version: seq CHARACTER
+  npm_version: seq CHARACTER
+  ecmarkup_version: seq CHARACTER
+  working_directory: DIRECTORY_PATH
+  output_directory: DIRECTORY_PATH
+  has_prince: BOOLEAN
+⊣
+  node_version ≠ ⟨⟩ ∧
+  ecmarkup_version = "21.4.0" ∧
+  output_directory = working_directory ⌢ "/out"
+
+-- ==================================================================================
+-- BUILD CONFIGURATION
+-- ==================================================================================
+
+BUILD_MODE ::= Standard | Strict | PDF | Snapshot | Watch
+
+schema BuildConfiguration
+  mode: BUILD_MODE
+  lint_enabled: BOOLEAN
+  strict_enabled: BOOLEAN
+  multipage_enabled: BOOLEAN
+  verbose: BOOLEAN
+  printable: BOOLEAN
+  watch_mode: BOOLEAN
+⊣
+  (mode = Strict ⇒ lint_enabled ∧ strict_enabled) ∧
+  (mode = PDF ⇒ printable) ∧
+  (mode = Watch ⇒ watch_mode)
+
+-- ==================================================================================
+-- BUILD STATE MODEL
+-- ==================================================================================
+
+BUILD_STATUS ::= NotStarted | InProgress | Success | Failed
+
+schema BuildState
+  status: BUILD_STATUS
+  source_file: SpecificationSource
+  assets: ℙ AssetFile
+  supporting_tables: ℙ SupportingTable
+  environment: BuildEnvironment
+  configuration: BuildConfiguration
+  output_artifacts: ℙ BuildArtifact
+  errors: seq ERROR_MESSAGE
+  warnings: seq WARNING_MESSAGE
+⊣
+  (status = Success ⇒ #errors = 0) ∧
+  (status = Failed ⇒ #errors > 0) ∧
+  (#output_artifacts > 0 ⇒ status = Success)
+
+given [ERROR_MESSAGE]
+given [WARNING_MESSAGE]
+
+schema BuildArtifact
+  artifact_type: ARTIFACT_TYPE
+  output_path: FILE_PATH
+  file: File
+  generation_time: ℕ
+
+-- ==================================================================================
+-- BUILD OPERATIONS
+-- ==================================================================================
+
+-- Initialize Build (Clean State)
+schema InitializeBuild
+  ΔBuildState
+⊣
+  status' = NotStarted ∧
+  #output_artifacts' = 0 ∧
+  #errors' = 0 ∧
+  #warnings' = 0
+
+-- Clean Output Directory
+schema CleanOutputDirectory
+  ΔBuildState
+  directory: DIRECTORY_PATH
+⊣
+  directory = environment.output_directory ∧
+  #output_artifacts' = 0 ∧
+  status' = NotStarted
+
+-- Create Output Directory
+schema CreateOutputDirectory
+  ΔBuildState
+⊣
+  pre status = NotStarted
+  post ∃ dir: DIRECTORY_PATH • 
+    dir = environment.output_directory ∧
+    status' = InProgress
+
+-- Copy Assets to Output
+schema CopyAssets
+  ΔBuildState
+  source_assets: ℙ AssetFile
+  destination: DIRECTORY_PATH
+⊣
+  pre status = InProgress
+  pre source_assets = assets
+  post ∀ asset: AssetFile | asset ∈ source_assets ⇒
+    ∃ copied: File • 
+      copied.name = asset.name ∧
+      copied.content = asset.content
+
+-- ==================================================================================
+-- ECMARKUP PROCESSING
+-- ==================================================================================
+
+schema EcmarkupProcessor
+  input_spec: SpecificationSource
+  config: BuildConfiguration
+  parsed_elements: ℙ PROCESSED_ELEMENT
+  resolved_xrefs: ℙ RESOLVED_XREF
+  formatted_grammar: ℙ FORMATTED_GRAMMAR
+  rendered_algorithms: ℙ RENDERED_ALGORITHM
+  table_of_contents: TOC_STRUCTURE
+  section_numbering: ℕ ⇸ SECTION_ID
+
+given [PROCESSED_ELEMENT]
+given [RESOLVED_XREF]
+given [FORMATTED_GRAMMAR]
+given [RENDERED_ALGORITHM]
+given [TOC_STRUCTURE]
+given [SECTION_ID]
+
+-- Parse Specification Source
+ParseSpecification: SpecificationSource ⇸ EcmarkupProcessor
+
+-- Process Ecmarkup Elements
+schema ProcessEcmarkupElements
+  ΔEcmarkupProcessor
+  elements: ℙ ECMARKUP_TAG
+⊣
+  pre elements = input_spec.ecmarkup_elements
+  post #parsed_elements' = #elements
+
+-- Resolve Cross-References
+schema ResolveCrossReferences
+  ΔEcmarkupProcessor
+  unresolved: ℙ XREF
+⊣
+  pre unresolved = input_spec.cross_references
+  post ∀ xref: XREF | xref ∈ unresolved ⇒
+    ∃ resolved: RESOLVED_XREF • 
+      resolved ∈ resolved_xrefs' ∧
+      ValidXrefTarget(resolved)
+
+ValidXrefTarget: RESOLVED_XREF → BOOLEAN
+
+-- Generate Table of Contents
+schema GenerateTOC
+  ΔEcmarkupProcessor
+⊣
+  post table_of_contents' ≠ ∅ ∧
+       ∀ section: SECTION_ID • 
+         section ∈ dom section_numbering' ⇒
+         SectionInTOC(section, table_of_contents')
+
+SectionInTOC: SECTION_ID × TOC_STRUCTURE → BOOLEAN
+
+-- Format Grammar Productions
+schema FormatGrammar
+  ΔEcmarkupProcessor
+  productions: ℙ GRAMMAR_RULE
+⊣
+  pre productions = input_spec.grammar_productions
+  post #formatted_grammar' = #productions ∧
+       ∀ rule: GRAMMAR_RULE | rule ∈ productions ⇒
+         ∃ formatted: FORMATTED_GRAMMAR • 
+           formatted ∈ formatted_grammar' ∧
+           PreservesSemantics(rule, formatted)
+
+PreservesSemantics: GRAMMAR_RULE × FORMATTED_GRAMMAR → BOOLEAN
+
+-- Render Algorithm Steps
+schema RenderAlgorithms
+  ΔEcmarkupProcessor
+  algorithms: ℙ ALGORITHM
+⊣
+  pre algorithms = input_spec.algorithm_steps
+  post #rendered_algorithms' = #algorithms ∧
+       ∀ alg: ALGORITHM | alg ∈ algorithms ⇒
+         ∃ rendered: RENDERED_ALGORITHM •
+           rendered ∈ rendered_algorithms' ∧
+           CorrectlyNumbered(rendered)
+
+CorrectlyNumbered: RENDERED_ALGORITHM → BOOLEAN
+
+-- ==================================================================================
+-- VALIDATION OPERATIONS
+-- ==================================================================================
+
+VALIDATION_LEVEL ::= MarkupOnly | WithLinting | Strict
+
+schema ValidationEngine
+  level: VALIDATION_LEVEL
+  markup_validator: MARKUP_VALIDATOR
+  lint_rules: ℙ LINT_RULE
+  strict_rules: ℙ STRICT_RULE
+
+given [MARKUP_VALIDATOR]
+given [LINT_RULE]
+given [STRICT_RULE]
+
+-- Validate Markup
+schema ValidateMarkup
+  ΞBuildState
+  validator: ValidationEngine
+  validation_errors: seq ERROR_MESSAGE
+⊣
+  (validator.level = MarkupOnly ⇒ 
+    CheckBasicMarkup(source_file, validation_errors)) ∧
+  (validator.level = WithLinting ⇒
+    CheckBasicMarkup(source_file, validation_errors) ∧
+    ApplyLintRules(source_file, validator.lint_rules, validation_errors)) ∧
+  (validator.level = Strict ⇒
+    CheckBasicMarkup(source_file, validation_errors) ∧
+    ApplyLintRules(source_file, validator.lint_rules, validation_errors) ∧
+    ApplyStrictRules(source_file, validator.strict_rules, validation_errors))
+
+CheckBasicMarkup: SpecificationSource × seq ERROR_MESSAGE → BOOLEAN
+ApplyLintRules: SpecificationSource × ℙ LINT_RULE × seq ERROR_MESSAGE → BOOLEAN
+ApplyStrictRules: SpecificationSource × ℙ STRICT_RULE × seq ERROR_MESSAGE → BOOLEAN
+
+-- ==================================================================================
+-- OUTPUT GENERATION
+-- ==================================================================================
+
+-- Generate Single-Page HTML
+schema GenerateSinglePageHTML
+  ΔBuildState
+  processor: EcmarkupProcessor
+⊣
+  pre status = InProgress
+  pre #errors = 0
+  post ∃ artifact: BuildArtifact •
+    artifact ∈ output_artifacts' ∧
+    artifact.artifact_type = SinglePageHTML ∧
+    artifact.output_path = environment.output_directory ⌢ "/index.html" ∧
+    ContainsAllContent(artifact, processor)
+
+ContainsAllContent: BuildArtifact × EcmarkupProcessor → BOOLEAN
+
+-- Generate Multi-Page HTML
+schema GenerateMultiPageHTML
+  ΔBuildState
+  processor: EcmarkupProcessor
+  page_split_strategy: PAGE_SPLIT_STRATEGY
+⊣
+  pre status = InProgress
+  pre configuration.multipage_enabled
+  post ∃ artifacts: ℙ BuildArtifact •
+    artifacts ⊆ output_artifacts' ∧
+    (∀ a: BuildArtifact | a ∈ artifacts ⇒ 
+      a.artifact_type = MultiPageHTML) ∧
+    #artifacts ≥ 10 ∧  -- Specification split into multiple pages
+    CoverageComplete(artifacts, processor)
+
+given [PAGE_SPLIT_STRATEGY]
+CoverageComplete: ℙ BuildArtifact × EcmarkupProcessor → BOOLEAN
+
+-- Generate PDF
+schema GeneratePDF
+  ΔBuildState
+  html_artifact: BuildArtifact
+  prince_processor: PRINCE_PROCESSOR
+⊣
+  pre status = InProgress
+  pre configuration.mode = PDF
+  pre environment.has_prince
+  pre html_artifact.artifact_type = SinglePageHTML
+  post ∃ pdf: BuildArtifact •
+    pdf ∈ output_artifacts' ∧
+    pdf.artifact_type = PDF ∧
+    pdf.output_path = environment.output_directory ⌢ "/ECMA-262.pdf" ∧
+    PDFFromHTML(pdf, html_artifact, prince_processor)
+
+given [PRINCE_PROCESSOR]
+PDFFromHTML: BuildArtifact × BuildArtifact × PRINCE_PROCESSOR → BOOLEAN
+
+-- ==================================================================================
+-- POST-PROCESSING OPERATIONS
+-- ==================================================================================
+
+-- Insert Snapshot Warning
+schema InsertSnapshotWarning
+  ΔBuildState
+  html_artifacts: ℙ BuildArtifact
+  commit_sha: seq CHARACTER
+  warning_html: seq CHARACTER
+  warning_css: seq CHARACTER
+⊣
+  pre configuration.mode = Snapshot
+  pre ∀ a: BuildArtifact | a ∈ html_artifacts ⇒
+    a.artifact_type ∈ {SinglePageHTML, MultiPageHTML}
+  post ∀ a: BuildArtifact | a ∈ html_artifacts ⇒
+    ∃ a': BuildArtifact •
+      a' ∈ output_artifacts' ∧
+      ContainsWarning(a', warning_html, warning_css, commit_sha)
+
+ContainsWarning: BuildArtifact × seq CHARACTER × seq CHARACTER × seq CHARACTER → BOOLEAN
+
+-- ==================================================================================
+-- COMPLETE BUILD PIPELINE
+-- ==================================================================================
+
+schema BuildPipeline
+  initial_state: BuildState
+  final_state: BuildState
+  steps: seq BUILD_STEP
+⊣
+  initial_state.status = NotStarted ∧
+  (final_state.status = Success ⇒ #final_state.output_artifacts > 0) ∧
+  (final_state.status = Failed ⇒ #final_state.errors > 0) ∧
+  ValidStepSequence(steps)
+
+BUILD_STEP ::= Clean | CreateDir | CopyAssets | Parse | Process | 
+               Validate | GenerateSingle | GenerateMulti | GeneratePDF |
+               InsertWarning | Complete
+
+ValidStepSequence: seq BUILD_STEP → BOOLEAN
+
+-- Execute Build Step
+schema ExecuteBuildStep
+  ΔBuildState
+  step: BUILD_STEP
+⊣
+  (step = Clean ⇒ CleanOutputDirectory) ∧
+  (step = CreateDir ⇒ CreateOutputDirectory) ∧
+  (step = CopyAssets ⇒ CopyAssets) ∧
+  (step = Validate ⇒ ValidateMarkup) ∧
+  (step = GenerateSingle ⇒ GenerateSinglePageHTML) ∧
+  (step = GenerateMulti ⇒ GenerateMultiPageHTML) ∧
+  (step = GeneratePDF ⇒ GeneratePDF) ∧
+  (step = InsertWarning ⇒ InsertSnapshotWarning) ∧
+  (step = Complete ⇒ status' = Success)
+
+-- ==================================================================================
+-- BUILD INVARIANTS
+-- ==================================================================================
+
+-- Build System Invariants
+schema BuildInvariants
+  state: BuildState
+⊣
+  -- Source must exist
+  state.source_file.name = "spec.html" ∧
+  
+  -- Output directory must be separate from source
+  state.environment.output_directory ≠ state.environment.working_directory ∧
+  
+  -- Success implies no errors
+  (state.status = Success ⇒ #state.errors = 0) ∧
+  
+  -- Failed implies at least one error
+  (state.status = Failed ⇒ #state.errors > 0) ∧
+  
+  -- Artifacts only exist on success
+  (#state.output_artifacts > 0 ⇒ state.status = Success) ∧
+  
+  -- Strict mode requires linting
+  (state.configuration.strict_enabled ⇒ state.configuration.lint_enabled) ∧
+  
+  -- PDF requires printable mode
+  (state.configuration.mode = PDF ⇒ state.configuration.printable) ∧
+  
+  -- Multipage enabled for standard builds
+  (state.configuration.mode ∈ {Standard, Strict} ⇒ 
+    state.configuration.multipage_enabled)
+
+-- ==================================================================================
+-- BUILD COMPLETENESS THEOREM
+-- ==================================================================================
+
+theorem BuildCompleteness
+  ∀ source: SpecificationSource; env: BuildEnvironment; config: BuildConfiguration •
+    ValidSource(source) ∧ ValidEnvironment(env) ⇒
+    ∃ pipeline: BuildPipeline •
+      pipeline.initial_state.source_file = source ∧
+      pipeline.initial_state.environment = env ∧
+      pipeline.initial_state.configuration = config ∧
+      (NoValidationErrors(source) ⇒ 
+        pipeline.final_state.status = Success ∧
+        #pipeline.final_state.output_artifacts > 0)
+
+ValidSource: SpecificationSource → BOOLEAN
+ValidEnvironment: BuildEnvironment → BOOLEAN
+NoValidationErrors: SpecificationSource → BOOLEAN
+
+-- ==================================================================================
+-- BUILD DETERMINISM THEOREM
+-- ==================================================================================
+
+theorem BuildDeterminism
+  ∀ source: SpecificationSource; env: BuildEnvironment; config: BuildConfiguration;
+    pipeline1, pipeline2: BuildPipeline •
+    pipeline1.initial_state.source_file = source ∧
+    pipeline2.initial_state.source_file = source ∧
+    pipeline1.initial_state.environment = env ∧
+    pipeline2.initial_state.environment = env ∧
+    pipeline1.initial_state.configuration = config ∧
+    pipeline2.initial_state.configuration = config ⇒
+    pipeline1.final_state.status = pipeline2.final_state.status ∧
+    SameOutputContent(pipeline1.final_state.output_artifacts,
+                      pipeline2.final_state.output_artifacts)
+
+SameOutputContent: ℙ BuildArtifact × ℙ BuildArtifact → BOOLEAN
+
+end schema
